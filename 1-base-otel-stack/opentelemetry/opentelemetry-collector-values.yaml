@@ -1,0 +1,190 @@
+image:
+  repository: otel/opentelemetry-collector-contrib
+  tag: latest
+#command:
+#  name: otelcol-k8s
+mode: statefulset
+presets:
+  logsCollection:
+    enabled: true
+    includeCollectorLogs: false
+  kubernetesAttributes:
+    enabled: false
+  clusterMetrics:
+    enabled: true
+  kubernetesEvents:
+    enabled: true
+service:
+  enabled: true
+extraManifests:
+  - apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: opentelemetry-collector-custom
+      namespace: open-telemetry
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: open-telemetry-collector-custom
+    subjects:
+      - kind: ServiceAccount
+        name: opentelemetry-collector-custom
+        namespace: open-telemetry
+    roleRef:
+      kind: ClusterRole
+      name: cluster-admin
+      apiGroup: rbac.authorization.k8s.io
+serviceAccount:
+  create: false
+  name: opentelemetry-collector-custom
+extraEnvs:
+  - name: K8S_NODE_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
+  - name: OPENTELEMETRY_POD_IP
+    valueFrom:
+      fieldRef:
+        fieldPath: status.podIP
+serviceMonitor:
+  enabled: false
+  metricsEndpoints:
+    - port: metrics
+      interval: 10s
+    - port: prometheus
+      interval: 10s
+      path: metrics
+  #extraLabels:
+  #  release: prometheus
+ports:
+  metrics:
+    enabled: true
+config:
+  receivers:
+    jaeger: null
+    zipkin: null
+    otlp:
+      protocols:
+        grpc:
+          endpoint: ${env:OPENTELEMETRY_POD_IP}:4317
+        http:
+          endpoint: ${env:OPENTELEMETRY_POD_IP}:4318
+    #prometheus:
+    #  config:
+    #    # Could be replaced with ServiceMonitor?
+    #    scrape_configs:
+    #      - job_name: opentelemetry-collector-internal
+    #        scrape_interval: 10s
+    #        static_configs:
+    #          - targets:
+    #              - ${env:OPENTELEMETRY_POD_IP}:8888
+    prometheus/internal:
+      config:
+        scrape_configs:
+          #- job_name: otel-collector
+          #  scrape_interval: 10s
+          #  static_configs:
+          #    - targets:
+          #        - localhost:8888
+
+          - job_name: jaeger-collector
+            scrape_interval: 10s
+            static_configs:
+              - targets:
+                  - jaeger-query.jaeger.svc.cluster.local:16687
+                  - jaeger-collector.jaeger.svc.cluster.local:14269
+
+          - job_name: cert-manager-collector
+            scrape_interval: 10s
+            static_configs:
+              - targets:
+                  - cert-manager.cert-manager.svc.cluster.local:9402
+                  - cert-manager-cainjector.cert-manager.svc.cluster.local:9402
+                  - cert-manager-webhook.cert-manager.svc.cluster.local:9402
+
+          - job_name: ingress-nginx-collector
+            scrape_interval: 10s
+            static_configs:
+              - targets:
+                  - ingress-nginx-controller-metrics.ingress-nginx.svc.cluster.local:10254
+
+          - job_name: metrics-server-collector
+            scrape_interval: 10s
+            scheme: https
+            tls_config:
+              insecure_skip_verify: true
+            static_configs:
+              - targets:
+                  - metrics-server.default.svc.cluster.local:443
+  processors:
+    memory_limiter:
+      check_interval: 5s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+    batch: {}
+    metricstransform:
+      transforms:
+        - include: .+
+          match_type: regexp
+          action: update
+          operations:
+            - action: add_label
+              new_label: kubernetes.cluster.distribution
+              new_value: kind
+            - action: add_label
+              new_label: kubernetes.cluster.author
+              new_value: piotr.rzepkowski
+  exporters:
+    otlphttp/prometheus:
+      endpoint: http://prometheus-prometheus.prometheus.svc.cluster.local:9090/prometheus/api/v1/otlp
+      tls:
+        insecure: true
+    prometheusremotewrite:
+      endpoint: http://prometheus-prometheus.prometheus.svc.cluster.local:9090/prometheus/api/v1/write
+      tls:
+        insecure: true
+    otlphttp/loki:
+      endpoint: http://loki.loki.svc.cluster.local:3100/otlp
+      tls:
+        insecure: true
+    otlp/jaeger:
+      endpoint: http://jaeger-collector.jaeger.svc.cluster.local:4317
+      tls:
+        insecure: true
+    debug:
+      {}
+      # verbosity: detailed
+  extensions:
+    health_check:
+      endpoint: ${env:OPENTELEMETRY_POD_IP}:13133
+  service:
+    extensions: [health_check]
+    pipelines:
+      metrics/prometheus:
+        receivers: [prometheus/internal]
+        processors: [memory_limiter, metricstransform, batch]
+        exporters: [prometheusremotewrite]
+      metrics/otlp:
+        receivers: [otlp]
+        processors: [memory_limiter, metricstransform, batch]
+        exporters: [otlphttp/prometheus]
+      logs:
+        receivers: [otlp, filelog]
+        processors: [memory_limiter, batch]
+        exporters: [otlphttp/loki]
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: [otlp/jaeger, debug]
+    telemetry:
+      metrics:
+        address: ${env:OPENTELEMETRY_POD_IP}:8888
+        level: detailed
+        readers:
+          - periodic:
+              exporter:
+                otlp:
+                  endpoint: opentelemetry-collector:4318
+                  protocol: http/protobuf
+              interval: 10000
+              timeout: 5000

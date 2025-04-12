@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dice-server
+  namespace: app
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /flask(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: dice-server
+                port:
+                  name: http
