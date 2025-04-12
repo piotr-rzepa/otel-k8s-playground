@@ -1,0 +1,123 @@
+# https://kubernetes.io/docs/concepts/configuration/configmap/
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-server-cm
+  namespace: app
+data:
+  app.py: |
+    from flask import Flask, request, jsonify
+    import logging
+    from datetime import date
+
+    app = Flask(__name__)
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+
+
+    @app.route("/auth")
+    def check_auth():
+        player = request.args.get("player", default="Anonymous", type=str)
+        if player == "Anonymous":
+            logger.error(f"Player {player} is not authorized to roll dice!")
+            return jsonify(
+                date=date.today(),
+                status=403,
+                mimetype="application/json",
+                response=f"Player {player} is authorized to roll dice!",
+            )
+        else:
+            logger.info(f"Player {player} is authorized to roll dice!")
+        return jsonify(
+            date=date.today(),
+            status=200,
+            mimetype="application/json",
+            response=f"Player {player} is authorized to roll dice!",
+        )
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-server
+  namespace: app
+spec:
+  selector:
+    app: auth-server
+  type: ClusterIP
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8081
+      targetPort: 8081
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: auth-server
+  name: auth-server
+  namespace: app
+spec:
+  containers:
+    - command:
+        - /bin/bash
+        - -c
+        - >
+          dnf install -yq pip &&
+          pip install -q flask requests werkzeug opentelemetry-distro opentelemetry-exporter-otlp opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-flask &&
+          cd /flask && opentelemetry-bootstrap -a install &&
+          opentelemetry-instrument flask run -p 8081 -h 0.0.0.0
+      image: amazonlinux
+      name: flask
+      env:
+        - name: OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED
+          value: "true"
+        - name: OTEL_LOGS_EXPORTER
+          value: otlp
+        - name: OTEL_TRACES_EXPORTER
+          value: otlp
+        - name: OTEL_METRICS_EXPORTER
+          value: otlp
+        - name: OTEL_SERVICE_NAME
+          value: auth-server
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://opentelemetry-collector.open-telemetry.svc.cluster.local:4317
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "service.name=auth-server,application=python-flask-auth-server"
+        - name: OTEL_PYTHON_LOG_LEVEL
+          value: INFO
+        - name: OTEL_METRIC_EXPORT_INTERVAL
+          value: "1000"
+        - name: OTEL_TRACES_EXPORT_INTERVAL
+          value: "1000"
+        - name: OTEL_PYTHON_LOG_CORRELATION
+          value: "true"
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: grpc
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+      volumeMounts:
+        - name: app
+          mountPath: /flask/app.py
+          subPath: app.py
+  dnsPolicy: ClusterFirst
+  restartPolicy: Always
+  volumes:
+    - name: app
+      configMap:
+        name: auth-server-cm
+        defaultMode: 0777

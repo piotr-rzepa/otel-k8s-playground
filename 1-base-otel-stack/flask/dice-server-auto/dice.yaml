@@ -1,0 +1,127 @@
+# https://kubernetes.io/docs/concepts/configuration/configmap/
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dice-server-cm
+  namespace: app
+data:
+  app.py: |
+    from random import randint
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    from flask import Flask, request
+    import logging
+    import requests
+
+    app = Flask(__name__)
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+
+
+    @app.route("/rolldice")
+    def roll_dice():
+        player = request.args.get("player", default="Anonymous", type=str)
+        r = requests.get(
+            "http://auth-server.app.svc.cluster.local:8081/auth",
+            verify=False,
+            params={"player": player},
+        )
+        result = str(roll())
+        if r.status_code == 200:
+            logger.info("Authenticating player %s is rolling the dice: %s", player, result)
+        else:
+            logger.warning(
+                "Unauthenticating player %s is rolling the dice: %s", player, result
+            )
+        return result
+
+
+    def roll():
+        return randint(1, 9)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dice-server
+  namespace: app
+spec:
+  selector:
+    app: dice-server
+  type: ClusterIP
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: dice-server
+  name: dice-server
+  namespace: app
+spec:
+  containers:
+    - command:
+        - /bin/bash
+        - -c
+        - >
+          dnf install -yq pip &&
+          pip install -q flask requests werkzeug opentelemetry-distro opentelemetry-exporter-otlp opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-flask &&
+          cd /flask && opentelemetry-bootstrap -a install &&
+          opentelemetry-instrument flask run -p 8080 -h 0.0.0.0
+      image: amazonlinux
+      name: flask
+      env:
+        - name: OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED
+          value: "true"
+        - name: OTEL_LOGS_EXPORTER
+          value: otlp
+        - name: OTEL_TRACES_EXPORTER
+          value: otlp
+        - name: OTEL_METRICS_EXPORTER
+          value: otlp
+        - name: OTEL_SERVICE_NAME
+          value: dice-server
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://opentelemetry-collector.open-telemetry.svc.cluster.local:4317
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "service.name=dice-server,application=python-flask-dice-server"
+        - name: OTEL_PYTHON_LOG_LEVEL
+          value: INFO
+        - name: OTEL_METRIC_EXPORT_INTERVAL
+          value: "1000"
+        - name: OTEL_TRACES_EXPORT_INTERVAL
+          value: "1000"
+        - name: OTEL_PYTHON_LOG_CORRELATION
+          value: "true"
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: grpc
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+      volumeMounts:
+        - name: app
+          mountPath: /flask/app.py
+          subPath: app.py
+  dnsPolicy: ClusterFirst
+  restartPolicy: Always
+  volumes:
+    - name: app
+      configMap:
+        name: dice-server-cm
+        defaultMode: 0777

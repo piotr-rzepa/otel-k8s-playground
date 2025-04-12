@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jaeger
+  namespace: jaeger
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /jaeger
+            pathType: Prefix
+            backend:
+              service:
+                name: jaeger-query
+                port:
+                  name: query

@@ -1,0 +1,36 @@
+provisionDataStore:
+  cassandra: false
+  elasticsearch: true
+allInOne:
+  enabled: false
+  extraEnv:
+    - name: QUERY_BASE_PATH
+      value: /jaeger
+storage:
+  type: elasticsearch
+  elasticsearch:
+    replicas: 1
+    minimumMasterNodes: 1
+    createCert: false
+    persistence:
+      enabled: false
+    tests:
+      enabled: false
+agent:
+  enabled: true
+collector:
+  enabled: true
+  basePath: /jaeger
+  cmdlineParams:
+    log-level: debug
+  service:
+    otlp:
+      grpc:
+        name: otlp-grpc
+        port: 4317
+      http:
+        name: otlp-http
+        port: 4318
+query:
+  enabled: true
+  basePath: /jaeger
