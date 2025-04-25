@@ -1,0 +1,142 @@
+repositories:
+  - name: jetstack
+    url: https://charts.jetstack.io
+  - name: open-telemetry
+    url: https://open-telemetry.github.io/opentelemetry-helm-charts
+  - name: grafana
+    url: https://grafana.github.io/helm-charts
+  - name: metrics-server
+    url: https://kubernetes-sigs.github.io/metrics-server
+  - name: ingress-nginx
+    url: https://kubernetes.github.io/ingress-nginx
+
+releases:
+  - name: metrics-server
+    namespace: default
+    createNamespace: true
+    chart: metrics-server/metrics-server
+    version: 3.12.2
+    atomic: true
+    cleanupOnFail: true
+    values:
+      - args:
+        - --kubelet-use-node-status-port
+        - --kubelet-insecure-tls
+      # Metrics Server is meant only for autoscaling purposes.
+      # For example, don't use it to forward metrics to monitoring solutions, or as a source of monitoring solution metrics.
+      # In such cases please collect metrics from Kubelet /metrics/resource endpoint directly.
+      # https://github.com/kubernetes-sigs/metrics-server
+      - metrics:
+          enabled: true
+      - serviceMonitor:
+          enabled: false
+
+  - name: cert-manager
+    namespace: cert-manager
+    createNamespace: true
+    chart: jetstack/cert-manager
+    version: 1.17.2
+    atomic: true
+    cleanupOnFail: true
+    values:
+      - crds:
+          enabled: true
+      - prometheus:
+          # Enable metrics endpoint, but do not create the ServiceMonitor CRD for Prometheus
+          enabled: true
+          servicemonitor:
+            enabled: false
+
+  - name: ingress-nginx
+    namespace: ingress-nginx
+    createNamespace: true
+    chart: ingress-nginx/ingress-nginx
+    version: 4.12.1
+    atomic: true 
+    cleanupOnFail: true 
+    values:
+      - controller:
+          service:
+            type: NodePort
+            nodePorts:
+              http: 30080
+              https: 30443
+          metrics:
+            enabled: true
+            service:
+              enabled: true
+
+  - name: mimir 
+    namespace: mimir 
+    createNamespace: true
+    chart: grafana/mimir-distributed
+    version: 5.8.0-weekly.339
+    atomic: true
+    cleanupOnFail: true
+    values:
+      - ./mimir/values.yaml
+    needs:
+      - cert-manager/cert-manager
+      - loki/loki
+
+  - name: grafana
+    namespace: grafana
+    createNamespace: true
+    chart: grafana/grafana
+    version: 8.12.1
+    atomic: true
+    cleanupOnFail: true
+    values:
+      - ./grafana/values.yaml
+
+  - name: opentelemetry-operator
+    namespace: open-telemetry
+    createNamespace: true
+    chart: open-telemetry/opentelemetry-operator
+    version: 0.87.0
+    atomic: true
+    cleanupOnFail: true
+    needs:
+      - cert-manager/cert-manager
+      - mimir/mimir
+    values:
+      - ./opentelemetry/operator-values.yaml
+
+  - name: tempo 
+    namespace: tempo 
+    createNamespace: true
+    chart: grafana/tempo-distributed
+    version: 1.38.2
+    atomic: true 
+    cleanupOnFail: true 
+    values:
+      - ./tempo/values.yaml
+    needs:
+      - loki/loki
+
+  - name: opentelemetry-collector
+    namespace: open-telemetry
+    createNamespace: true
+    chart: open-telemetry/opentelemetry-collector
+    version: 0.122.0
+    atomic: true
+    cleanupOnFail: true
+    values:
+      - ./opentelemetry/collector-values.yaml
+    needs:
+      - cert-manager/cert-manager
+      - open-telemetry/opentelemetry-operator
+      - mimir/mimir
+
+  - name: loki
+    namespace: loki
+    createNamespace: true
+    chart: grafana/loki
+    version: 6.29.0
+    atomic: true
+    cleanupOnFail: true 
+    values:
+      - ./loki/values.yaml
+    needs:
+      - grafana/grafana
+
