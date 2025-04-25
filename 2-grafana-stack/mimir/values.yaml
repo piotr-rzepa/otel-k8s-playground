@@ -1,0 +1,36 @@
+mimir:
+  structuredConfig:
+    frontend:
+      query_result_response_format: protobuf
+    limits:
+      native_histograms_ingestion_enabled: true
+    ingester:
+      ring:
+        replication_factor: 1
+    alertmanager:
+      sharding_ring:
+        replication_factor: 1
+    store_gateway:
+      sharding_ring:
+        replication_factor: 1
+
+minio:
+  enabled: true
+alertmanager:
+  enabled: false
+ingester:
+  replicas: 1
+  zoneAwareReplication:
+    enabled: false
+querier:
+  replicas: 1
+query_scheduler:
+  replicas: 1
+nginx:
+  enabled: true
+gateway:
+  enabled: false
+store_gateway:
+  replicas: 1
+  zoneAwareReplication:
+    enabled: false
