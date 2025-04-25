@@ -1,0 +1,50 @@
+tempo:
+  structuredConfig:
+    stream_over_http_enabled: true
+ingester:
+  replicas: 1
+  persistence:
+    enabled: true
+  config:
+    replication_factor: 1
+# Optional component for generating Service graphs and RED metrics from spans
+metricsGenerator:
+  enabled: true
+  config:
+    storage:
+      path: /var/tempo/generator/wall
+      remote_write:
+        - url: http://prometheus-prometheus.prometheus.svc.cluster.local:9090/api/v1/write
+          send_exemplars: true
+      remote_write_flush_deadline: 1m
+    traces_storage:
+      path: /var/tempo/generator/traces
+    metrics_ingestion_time_range_slack: 120s
+    processor:
+      service_graphs:
+      span_metrics:
+      local_blocks:
+traces:
+  otlp:
+    http:
+      enabled: true
+    grpc:
+      enabled: true
+storage:
+  trace:
+    backend: s3
+    s3:
+      bucket: tempo-traces
+      endpoint: loki-minio.loki.svc.cluster.local:9000
+      access_key: tempo-user
+      secret_key: supersecretpassword
+      insecure: true
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+overrides:
+  defaults:
+    metrics_generator:
+      processors: [service-graphs, span-metrics, local-blocks]
+      generate_native_histograms: native
