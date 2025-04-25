@@ -133,7 +133,7 @@ config:
               new_value: kind
             - action: add_label
               new_label: kubernetes.cluster.author
-              new_value: piotr.rzepkowski
+              new_value: piotr.rzepa
   exporters:
     otlphttp/prometheus:
       endpoint: http://prometheus-prometheus.prometheus.svc.cluster.local:9090/prometheus/api/v1/otlp
