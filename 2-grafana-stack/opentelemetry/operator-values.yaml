@@ -1,0 +1,11 @@
+crds:
+  create: true
+admissionWebhooks:
+  certManager:
+    enabled: true
+manager:
+  collectorImage:
+    repository: otel/opentelemetry-collector-contrib
+  createRbacPermissions: true
+  serviceMonitor:
+    enabled: false
