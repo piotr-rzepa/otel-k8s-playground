@@ -1,0 +1,75 @@
+persistence:
+  enabled: true
+  size: 8Gi
+service:
+  type: ClusterIP
+datasources:
+  prometheus.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://mimir-nginx.mimir.svc.cluster.local/prometheus
+        isDefault: false
+        jsonData:
+          manageAlerts: false
+          prometheusType: Prometheus
+          prometheusVersion: 3.1.0
+          cacheLevel: "Low"
+          disableRecordingRules: false
+        editable: true
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://loki.loki.svc.cluster.local:3100
+        isDefault: false
+        jsonData:
+          timeout: 60
+          maxLines: 5000
+        editable: true
+      - name: Tempo
+        type: tempo
+        access: proxy
+        url: http://tempo-query-frontend.tempo.svc.cluster.local:3100
+        editable: true
+        basicAuth: false
+        jsonData:
+          tracesToLogsV2:
+            datasourceUid: "Loki"
+            spanStartTimeShift: "-1h"
+            spanEndTimeShift: "1h"
+            filterByTraceID: false
+            filterBySpanID: false
+          tracesToMetrics:
+            datasourceUid: "Prometheus"
+            spanStartTimeShift: "-1h"
+            spanEndTimeShift: "1h"
+          serviceMap:
+            datasourceUid: "Prometheus"
+          nodeGraph:
+            enabled: true
+          search:
+            hide: false
+          traceQuery:
+            timeShiftEnabled: true
+            spanStartTimeShift: "-1h"
+            spanEndTimeShift: "1h"
+          streamingEnabled:
+            search: true
+
+# Configure anonymous access to avoid need of logging in each time
+grafana.ini:
+  server:
+    # Remove fs not using Grafana on a sub-path behind reverse proxy
+    root_url: http://localhost/grafana
+    serve_from_sub_path: true
+
+  users:
+    viewers_can_edit: true
+  auth:
+    disable_login_form: false
+    disable_signout_menu: true
+  auth.anonymous:
+    enabled: true
+    org_role: Admin
